@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SESSION="${ZELLIJ_SESSION:-zwait}"
+TIMEOUT="${ZWAIT_TIMEOUT:-120}"
+POLL="${ZWAIT_POLL:-1}"
+PROMPT_PREFIX="${ZWAIT_PROMPT_PREFIX:-$ }"
+
+[ $# -eq 0 ] && { echo "usage: zwait <command...>" >&2; exit 2; }
+
+TICK="/tmp/zwait_${SESSION}_tick"
+RC="/tmp/zwait_${SESSION}_rc"
+CMD="$*"
+NLINES=$(printf '%s' "$CMD" | awk 'END{print NR}')
+[ "$NLINES" -lt 1 ] && NLINES=1
+
+have_settled() {
+  awk -v p="$PROMPT_PREFIX" '
+    BEGIN { plen = length(p) }
+    { sub(/[[:space:]]+$/, "") }
+    { if (substr($0, 1, plen) == p) last = NR }
+    END { exit (last && last > 1) ? 0 : 1 }
+  '
+}
+
+extract_output() {
+  awk -v nlines="$1" -v p="$PROMPT_PREFIX" '
+    BEGIN { plen = length(p) }
+    { sub(/[[:space:]]+$/, ""); lines[++n] = $0 }
+    END {
+      for (i = 1; i <= n; i++) {
+        if (substr(lines[i], 1, plen) == p) prompts[++np] = i
+      }
+      if (np >= 2) {
+        prev = prompts[np - 1]
+        last = prompts[np]
+        start = prev + 1 + nlines
+        end   = last - 1
+      } else if (np == 1) {
+        start = 1
+        end   = prompts[1] - 1
+      } else {
+        start = 1; end = n
+      }
+      while (start <= end && lines[start] == "") start++
+      while (end   >= start && lines[end]   == "") end--
+      for (i = start; i <= end; i++) print lines[i]
+    }
+  '
+}
+
+before=$(stat -c %Y "$TICK" 2>/dev/null || echo 0)
+
+PASTE_START=$'\e[200~'
+PASTE_END=$'\e[201~'
+zellij -s "$SESSION" action write-chars "${PASTE_START}${CMD}${PASTE_END}"
+zellij -s "$SESSION" action write 10
+
+deadline=$((SECONDS + TIMEOUT))
+while (( SECONDS < deadline )); do
+  sleep "$POLL"
+  now=$(stat -c %Y "$TICK" 2>/dev/null || echo 0)
+  (( now > before )) || continue
+  for j in 0.05 0.1 0.2 0.4 0.8 1.6; do
+    sleep "$j"
+    screen=$(zellij -s "$SESSION" action dump-screen)
+    if printf '%s\n' "$screen" | have_settled; then
+      rc=$(cat "$RC" 2>/dev/null || echo 0)
+      printf '%s\n' "$screen" | extract_output "$NLINES"
+      exit "${rc:-0}"
+    fi
+  done
+  rc=$(cat "$RC" 2>/dev/null || echo 0)
+  printf '%s\n' "$screen" | extract_output "$NLINES"
+  exit "${rc:-0}"
+done
+echo "zwait: timeout after ${TIMEOUT}s waiting for command to finish" >&2
+exit 124

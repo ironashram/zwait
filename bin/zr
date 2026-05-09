@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SESSION="${ZELLIJ_SESSION:-zwait}"
+if [ "${1:-}" = "-f" ] || [ "${1:-}" = "--full" ]; then
+  exec zellij -s "$SESSION" action dump-screen --full
+fi
+exec zellij -s "$SESSION" action dump-screen

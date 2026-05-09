@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SESSION="${ZELLIJ_SESSION:-zwait}"
+[ $# -eq 0 ] && {
+  echo "usage: zi <text>    types into active pane, no Enter" >&2
+  echo "for raw bytes: zellij -s \"\$ZELLIJ_SESSION\" action write <byte>" >&2
+  exit 2
+}
+exec zellij -s "$SESSION" action write-chars "$*"

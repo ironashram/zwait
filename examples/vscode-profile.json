@@ -1,0 +1,21 @@
+{
+  "// Drop these settings into ~/.config/Code/User/settings.json (Linux) or": "",
+  "// ~/Library/Application Support/Code/User/settings.json (macOS).": "",
+  "// Each VSCode window gets its own zellij session named vscode-<workspace-folder-name>,": "",
+  "// so opening multiple windows on different workspaces no longer evicts each other.": "",
+  "// The helpers default to the same name when launched from inside that VSCode window's": "",
+  "// extension host (Claude Code's Bash subprocess inherits VSCODE_CWD), so they target": "",
+  "// the right pane automatically.": "",
+
+  "terminal.integrated.profiles.linux": {
+    "zellij": {
+      "path": "/bin/sh",
+      "args": ["-c", "B=$(basename \"$PWD\"); case \"$B\" in ''|/) B=default;; esac; S=vscode-$B; zellij delete-session \"$S\" --force >/dev/null 2>&1; exec zellij attach -c \"$S\""]
+    }
+  },
+  "terminal.integrated.defaultProfile.linux": "zellij",
+  "terminal.integrated.shellIntegration.enabled": false,
+  "terminal.integrated.enablePersistentSessions": false,
+  "terminal.integrated.enableMultiLinePasteWarning": "never",
+  "python.terminal.shellIntegration.enabled": false
+}
