@@ -63,7 +63,7 @@ while (( SECONDS < deadline )); do
   (( now > before )) || continue
   for j in 0.05 0.1 0.2 0.4 0.8 1.6; do
     sleep "$j"
-    screen=$(zellij -s "$SESSION" action dump-screen)
+    screen=$(zellij -s "$SESSION" action dump-screen --full)
     if printf '%s\n' "$screen" | have_settled; then
       rc=$(cat "$RC" 2>/dev/null || echo 0)
       printf '%s\n' "$screen" | extract_output "$NLINES"
