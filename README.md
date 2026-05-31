@@ -34,8 +34,8 @@ zellij's screen-dump; the user observes by, well, looking at the pane.
 |                    |   chars       |  $ <cmd>          |
 |                    |               |  ...output...     |
 |                    |               |                   |
-|                    |  <-- mtime ---|  precmd hook      |
-|                    |     tick      |  writes $? + tick |
+|                    |  <- result ---|  precmd hook      |
+|                    |     file      |  writes $? to it  |
 |                    |               |                   |
 |  dump-screen ----->|               |                   |
 |  extract output    |               |                   |
@@ -44,12 +44,15 @@ zellij's screen-dump; the user observes by, well, looking at the pane.
 
 1. A zellij session is running with one pane attached to an interactive shell.
 2. The shell sources `shell/zwait.zsh` (or `.bash`), which adds a `precmd`
-   hook that writes `$?` and touches an mtime tick file after every command.
-3. From outside the session, `zwait '<cmd>'` types the command into the pane
-   via `zellij action write-chars`, then polls the tick file. When the tick
-   advances, the command finished. `zwait` dumps the screen, extracts the
-   output between the previous prompt and the new one, prints it, and exits
-   with the captured `$?`.
+   hook. After every command it writes the command's `$?` into the per-command
+   result file the helper named for that call.
+3. From outside the session, `zwait '<cmd>'` writes a unique result-file path
+   into a pointer file, types the command into the pane via `zellij action
+   write-chars`, then polls for that result file. When it appears the command
+   finished. `zwait` dumps the screen, extracts the output between the previous
+   prompt and the new one, prints it, and exits with the captured `$?`.
+   Concurrent `zwait` calls against the same session are serialized by a
+   per-session lock, so a batch of calls can't garble the shared pane.
 
 The user sees `<cmd>` in their shell history exactly as they would have typed
 it. The agent gets clean stdout and a real exit code.
@@ -59,7 +62,7 @@ it. The agent gets clean stdout and a real exit code.
 - [zellij](https://zellij.dev/) on `$PATH`
 - bash (for the helpers themselves)
 - zsh or bash for the interactive shell that runs in the pane
-- Linux (uses `stat -c %Y`; macOS users can swap to `stat -f %m`)
+- Linux (the per-session lock uses util-linux `flock`)
 
 ## Install
 
@@ -120,18 +123,25 @@ Environment variables:
 |---|---|---|
 | `ZELLIJ_SESSION` | `zwait` | Session name to target. |
 | `ZWAIT_TIMEOUT` | `120` | Seconds before `zwait` gives up (command keeps running). |
-| `ZWAIT_POLL` | `1` | Tick-file poll interval in seconds. |
-| `ZWAIT_PROMPT_PREFIX` | `$ ` | First characters of your shell prompt. Used to find prompt boundaries when extracting output. |
+| `ZWAIT_POLL` | `1` | Result-file poll interval in seconds. |
+| `ZWAIT_PROMPT_PREFIX` | `$ ` | First characters of your shell prompt. **Set this to something distinctive** - the default `$ ` collides with command and output lines. |
 
-The prompt prefix is the trickiest knob. `zwait` decides "where does the
-output end and the next prompt begin" by looking for lines that start with
-`$ZWAIT_PROMPT_PREFIX`. If your prompt starts with something distinctive
-(e.g. `❯ `, `┌─[`, your username, `>>>`), set `ZWAIT_PROMPT_PREFIX` to that.
-If your prompt is just `$ ` or `% `, the default works but command lines
-that themselves start with `$` could confuse the parser. See
-[docs/design.md](docs/design.md) for the parsing logic.
+**Set `ZWAIT_PROMPT_PREFIX` to something distinctive - this is the most
+important knob.** `zwait` decides "where does the output end and the next
+prompt begin" by looking for lines that start with `$ZWAIT_PROMPT_PREFIX`, and
+it decides "is the pane idle" by checking the last line is the bare prefix. The
+default `$ ` is a footgun: it collides with command lines and any output line
+starting with `$ `, corrupting both the output extraction and the idle check.
+Pick a prefix that won't appear at the start of normal output - a themed prompt
+glyph (`❯ `, `┌─[`), your `user@host:` segment, or a dedicated `PS1` like
+`[zwait] `. See [docs/design.md](docs/design.md) for the parsing logic.
 
 ## Things to watch out for
+
+- **Parallel calls are safe but serialized.** Multiple `zwait` calls against
+  the same session (e.g. an agent firing a batch in one message) won't corrupt
+  the pane - a per-session lock runs them one at a time. No speedup from
+  parallelism on a single pane, just safety.
 
 - **The pane must be attached.** If the zellij session has no client, `zwait`
   still types characters but the user won't see them. `zellij list-sessions`
@@ -217,11 +227,11 @@ themselves are bash scripts and don't care which shell runs in the pane.
 
 ## Design
 
-[docs/design.md](docs/design.md) covers the non-obvious choices: why mtime
-ticks instead of file content, why bracketed-paste mode for the command
-write, why the screen-dump regex looks the way it does, why
-`delete-session --force` has an unfixable race, and what fails on which
-platforms.
+[docs/design.md](docs/design.md) covers the non-obvious choices: why a
+per-command result file (and a per-session lock) instead of an mtime tick, why
+bracketed-paste mode for the command write, why the screen-dump regex looks the
+way it does, why `delete-session --force` has an unfixable race, and what fails
+on which platforms.
 
 ## License
 

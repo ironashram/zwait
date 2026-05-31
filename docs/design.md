@@ -26,31 +26,44 @@ characters to a pane (`action write-chars`) and read the rendered screen back
 `capture-pane`); a port to tmux would change about ten lines of `zwait`.
 GNU screen has them too (`stuff` and `hardcopy`).
 
-## Why mtime ticks instead of file content
+## Why a per-command result file
 
 The completion signal is "the precmd hook ran, which means the previous
-command finished." We could express that as:
+command finished." Each `zwait` invocation picks a unique result-file path
+(`/tmp/zwait_<session>_done_<pid>`), writes that path into a per-session
+pointer file (`/tmp/zwait_<session>_current`), then sends the command. When
+the command finishes, the precmd hook reads the pointer and writes the
+command's exit code into that file. The helper polls for *its own* file to
+appear; the exit code rides in the content, read once.
 
-- A counter file the precmd writes (incrementing each time)
-- The exit code itself (precmd writes `$?` to a file)
-- A unique marker the precmd writes
+An earlier version used `stat -c %Y` on a single shared tick file: read the
+mtime before sending, poll until it advances. Simpler, but it has two problems
+a per-command file doesn't:
 
-All of those work, but they all require comparing *content*, which means
-either reading the file twice and diffing, or writing a unique value the
-caller knows in advance and waiting for it to appear.
+- **Second resolution.** Two commands that complete within the same wall-clock
+  second are indistinguishable by mtime, so a fast command right after another
+  could be missed. File existence has no such ambiguity.
+- **No concurrency.** A shared tick/rc pair means two in-flight calls against
+  the same session clobber each other's signal. Per-command files are isolated
+  by PID, so combined with the lock (below) concurrent calls are safe rather
+  than a misuse pattern.
 
-`stat -c %Y` is simpler: it returns a Unix timestamp with second resolution.
-Read it before sending the command, poll until it advances, done. No content
-comparison, no race between read and write, no unique-marker bookkeeping.
+## Why a per-session lock and idle guard
 
-The exit code still gets written to a separate `_rc` file (read once, after
-the tick advances), but that's just a value-carrier, not a signal.
+All calls against one session type into the same pane, so two writers would
+interleave keystrokes on the same input line. `zwait` takes an exclusive
+`flock` on `/tmp/zwait_<session>_lock` (util-linux `flock`) for the whole
+send-and-wait critical section. Concurrent calls then serialize: each runs to
+completion in turn. There is no wall-clock speedup on a single pane - the point
+is safety, so batching independent calls can't corrupt the pane.
 
-The one limitation: two commands that complete within the same second won't
-distinguishable by mtime alone. In practice, `zwait` types one command,
-waits for it to complete, then exits - so the next `zwait` invocation
-re-reads the mtime fresh. Multiple `zwait` calls in flight against the same
-session would race, but that's a misuse pattern.
+The lock alone isn't enough for one edge case: if a call hits its timeout and
+exits (releasing the lock) while its command is still running, the next call
+would acquire the lock and type into a busy pane. So after acquiring the lock,
+`zwait` waits (bounded by `ZWAIT_TIMEOUT`) for the pane to show an idle prompt
+- the last non-blank line being the bare prompt prefix - before sending. If the
+pane never goes idle in time, the call bails with rc 124 instead of typing into
+a running command.
 
 ## Why bracketed-paste mode for the write
 
@@ -184,19 +197,21 @@ Three reasons:
 1. **No build step.** `git clone && put on PATH` works on any Linux box.
 2. **Inspection.** Users who hit a bug can `cat $(which zwait)` and read
    the whole thing. The 70-line awk-and-sleep loop is not magic.
-3. **The dependencies are the same anyway.** `zellij`, `awk`, `stat` -
+3. **The dependencies are the same anyway.** `zellij`, `awk`, `flock` -
    all already on the system.
 
-The cost: portability is ad-hoc. macOS needs `stat -f %m` instead of `stat
--c %Y`. BSD awk and GNU awk differ on a few edge cases. If `zwait` ever
-gets serious adoption, a single-binary Go rewrite would be reasonable.
+The cost: portability is ad-hoc. The lock uses util-linux `flock`, which
+BSD/macOS don't ship. BSD awk and GNU awk differ on a few edge cases. If
+`zwait` ever gets serious adoption, a single-binary Go rewrite would be
+reasonable.
 
 ## What fails on which platforms
 
-- **macOS:** `stat -c %Y` doesn't work. Replace with `stat -f %m`. Otherwise
-  fine.
+- **macOS:** no util-linux `flock` (BSD `flock` differs); the lock needs
+  adapting or removing. Completion detection is just file existence and works.
+  Otherwise fine.
 - **WSL:** works, but `/tmp` is per-WSL-instance, so don't try to drive a
   zellij session that's running on the Windows host.
-- **non-Linux Unixes (FreeBSD, OpenBSD):** `stat` flags differ. zellij itself
-  builds and runs there. Untested.
+- **non-Linux Unixes (FreeBSD, OpenBSD):** `flock` and a few `awk` edge cases
+  differ. zellij itself builds and runs there. Untested.
 - **Termux / Android:** zellij is in the Termux repos. `/tmp` works. Untested.

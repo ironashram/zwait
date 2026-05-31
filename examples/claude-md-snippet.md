@@ -20,8 +20,9 @@ into general behavior over a long session.
 - The helpers:
   - `zwait '<cmd>'` is the default. Types only the bare command into the
     pane (so the user's shell history shows their original cmd verbatim,
-    no markers), waits for completion via a precmd hook that writes rc +
-    an mtime tick, then returns clean output and propagates the exit code.
+    no markers), waits for completion via a precmd hook that writes the exit
+    code into a per-command result file, then returns clean output and
+    propagates the exit code.
     Default timeout 120s. The 120s is purely a visibility cap on your
     side, not a command lifetime cap. When it trips, the helper returns
     "timeout after 120s" with rc 124, but the underlying command keeps
