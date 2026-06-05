@@ -43,16 +43,19 @@ zellij's screen-dump; the user observes by, well, looking at the pane.
 ```
 
 1. A zellij session is running with one pane attached to an interactive shell.
-2. The shell sources `shell/zwait.zsh` (or `.bash`), which adds a `precmd`
-   hook. After every command it writes the command's `$?` into the per-command
-   result file the helper named for that call.
-3. From outside the session, `zwait '<cmd>'` writes a unique result-file path
-   into a pointer file, types the command into the pane via `zellij action
-   write-chars`, then polls for that result file. When it appears the command
-   finished. `zwait` dumps the screen, extracts the output between the previous
-   prompt and the new one, prints it, and exits with the captured `$?`.
-   Concurrent `zwait` calls against the same session are serialized by a
-   per-session lock, so a batch of calls can't garble the shared pane.
+2. The shell sources `shell/zwait.zsh`, which adds `preexec` and `precmd`
+   hooks. `zwait` writes a unique token before sending each command; the
+   `preexec` hook (which fires only when a real command runs) claims that
+   token, and `precmd` writes the command's `$?` into the result file named for
+   that token. Empty Enters and redraws fire `precmd` but not `preexec`, so they
+   can't fake a completion.
+3. From outside the session, `zwait '<cmd>'` writes the token, types the command
+   into the pane via `zellij action write-chars`, then polls for that result
+   file. When it appears the command finished. `zwait` dumps the screen, extracts
+   the output between the previous prompt and the new one, prints it, and exits
+   with the captured `$?`. Concurrent `zwait` calls against the same session are
+   serialized by a per-session lock, so a batch of calls can't garble the shared
+   pane.
 
 The user sees `<cmd>` in their shell history exactly as they would have typed
 it. The agent gets clean stdout and a real exit code.
@@ -61,7 +64,7 @@ it. The agent gets clean stdout and a real exit code.
 
 - [zellij](https://zellij.dev/) on `$PATH`
 - bash (for the helpers themselves)
-- zsh or bash for the interactive shell that runs in the pane
+- zsh for the interactive shell that runs in the pane (needs `preexec`/`precmd`)
 - Linux (the per-session lock uses util-linux `flock`)
 
 ## Install
@@ -77,8 +80,7 @@ cd zwait
 install -m 0755 bin/zwait bin/zr bin/zi /usr/local/bin/
 
 # shell hook for the interactive shell that runs inside the zellij pane
-echo "source $(pwd)/shell/zwait.zsh" >> ~/.zshrc      # zsh
-echo "source $(pwd)/shell/zwait.bash" >> ~/.bashrc    # bash
+echo "source $(pwd)/shell/zwait.zsh" >> ~/.zshrc
 ```
 
 Then start a zellij session your agent will use:
@@ -208,11 +210,6 @@ Caveats:
   with `ZELLIJ_SESSION=vscode-myrepo zwait '...'` (or `export
   ZELLIJ_SESSION=...` once per terminal).
 
-## Bash support
-
-Shell hook for bash is in [shell/zwait.bash](shell/zwait.bash). The helpers
-themselves are bash scripts and don't care which shell runs in the pane.
-
 ## Examples
 
 - [examples/vscode-profile.json](examples/vscode-profile.json) - VSCode
@@ -228,10 +225,10 @@ themselves are bash scripts and don't care which shell runs in the pane.
 ## Design
 
 [docs/design.md](docs/design.md) covers the non-obvious choices: why a
-per-command result file (and a per-session lock) instead of an mtime tick, why
-bracketed-paste mode for the command write, why the screen-dump regex looks the
-way it does, why `delete-session --force` has an unfixable race, and what fails
-on which platforms.
+preexec-claimed token (and a per-session lock) instead of an mtime tick or a
+precmd-consumed pointer, why bracketed-paste mode for the command write, why the
+screen-dump regex looks the way it does, why `delete-session --force` has an
+unfixable race, and what fails on which platforms.
 
 ## License
 

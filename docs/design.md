@@ -26,27 +26,39 @@ characters to a pane (`action write-chars`) and read the rendered screen back
 `capture-pane`); a port to tmux would change about ten lines of `zwait`.
 GNU screen has them too (`stuff` and `hardcopy`).
 
-## Why a per-command result file
+## Why a preexec-claimed token
 
-The completion signal is "the precmd hook ran, which means the previous
-command finished." Each `zwait` invocation picks a unique result-file path
-(`/tmp/zwait_<session>_done_<pid>`), writes that path into a per-session
-pointer file (`/tmp/zwait_<session>_current`), then sends the command. When
-the command finishes, the precmd hook reads the pointer and writes the
-command's exit code into that file. The helper polls for *its own* file to
-appear; the exit code rides in the content, read once.
+The completion signal is "a real command finished." The subtlety is matching a
+generic shell-hook firing to the *specific* command `zwait` sent. `zwait`
+allocates a unique token under the lock (`/tmp/zwait_<session>_seq`, a monotonic
+counter, never reused) and writes it into `/tmp/zwait_<session>_expect` right
+before sending the command. The shell's `preexec` hook - which fires *only* when
+a real command is about to run - claims that token; the `precmd` hook then writes
+the command's exit code into `/tmp/zwait_<session>_done_<token>` (via a temp file
+plus atomic rename, so a reader never sees a half-written or zero-byte file). The
+helper polls for *its own* done file.
 
-An earlier version used `stat -c %Y` on a single shared tick file: read the
-mtime before sending, poll until it advances. Simpler, but it has two problems
-a per-command file doesn't:
+The earlier design consumed a single shared pointer inside `precmd` instead:
+`zwait` wrote the result path into `_current`, and `precmd` read-and-cleared it.
+That looks per-command but isn't, because `precmd` fires on *every* prompt
+redraw - empty Enter, Ctrl-C at an idle prompt, a late repaint of the previous
+command's prompt. Any such spurious `precmd` between "zwait armed the pointer"
+and "the real command finished" consumes the pointer: it either writes the wrong
+(previous) exit code, returning a premature/empty result, or clears the slot so
+the real command's `precmd` no-ops and the helper hangs until timeout. Gating the
+claim on `preexec` closes this entirely - empty Enters and redraws fire `precmd`
+but never `preexec`, so they can't claim a token, and the exit code is paired with
+the token at the moment the command actually finishes.
+
+An even earlier version used `stat -c %Y` on a shared tick file (read mtime
+before sending, poll until it advances). Two problems the token doesn't have:
 
 - **Second resolution.** Two commands that complete within the same wall-clock
   second are indistinguishable by mtime, so a fast command right after another
-  could be missed. File existence has no such ambiguity.
-- **No concurrency.** A shared tick/rc pair means two in-flight calls against
-  the same session clobber each other's signal. Per-command files are isolated
-  by PID, so combined with the lock (below) concurrent calls are safe rather
-  than a misuse pattern.
+  could be missed. Token files have no such ambiguity.
+- **No attribution.** A shared tick can't tell *which* command finished, and two
+  in-flight calls clobber each other's signal. The per-session lock serializes
+  callers and the per-token file isolates results.
 
 ## Why a per-session lock and idle guard
 
@@ -122,9 +134,9 @@ A more robust alternative would be to have the precmd hook write a unique
 sentinel (e.g. a UUID) into the prompt itself, and parse on that. That's a
 cleaner v2.
 
-## Why the post-tick "settle" loop
+## Why the post-completion "settle" loop
 
-After the tick advances, `zwait` doesn't immediately dump. It does:
+After the done file appears, `zwait` doesn't immediately dump. It does:
 
 ```
 sleep 0.05
@@ -138,7 +150,7 @@ dump
 
 Each dump checks "is there a fresh prompt line at position > 1?". The reason:
 the precmd hook fires *before* the prompt is rendered. So at the moment the
-tick advances, the screen is "command output, then nothing yet, then the
+done file appears, the screen is "command output, then nothing yet, then the
 prompt is about to be drawn." If we dump too early, we miss the new prompt
 and our regex thinks the command isn't done.
 

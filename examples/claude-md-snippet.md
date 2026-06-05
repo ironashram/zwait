@@ -20,9 +20,9 @@ into general behavior over a long session.
 - The helpers:
   - `zwait '<cmd>'` is the default. Types only the bare command into the
     pane (so the user's shell history shows their original cmd verbatim,
-    no markers), waits for completion via a precmd hook that writes the exit
-    code into a per-command result file, then returns clean output and
-    propagates the exit code.
+    no markers), waits for completion via preexec/precmd hooks that record the
+    exit code in a per-command file, then returns clean output and propagates
+    the exit code.
     Default timeout 120s. The 120s is purely a visibility cap on your
     side, not a command lifetime cap. When it trips, the helper returns
     "timeout after 120s" with rc 124, but the underlying command keeps
@@ -42,15 +42,13 @@ into general behavior over a long session.
   - For raw special keys, use `zellij -s "$ZELLIJ_SESSION" action write
     <byte>` (3=Ctrl-C, 10=Enter, 27=Esc).
 
-- Never use `zwait` with anything that terminates the interactive shell
-  (`exit N`, `kill -9 $$`) - that closes the pane and kills the session.
-
 - **Never use plain Bash.** Every shell command goes through `zwait` (or
   `zr`/`zi` for their specific niches). No fallback list, no exceptions.
   If a command is incompatible with `zwait` (TUI/interactive like
   `vim`/`less`/`htop`, needs stdin like password prompts, never returns
-  like `tail -f`, or would kill the shell like `exit`), do not run it -
-  print the command for the user to run themselves instead.
+  like `tail -f`, or would kill the shell like `exit`/`kill -9 $$`, which
+  closes the pane and the session), do not run it - print the command for
+  the user to run themselves instead.
 
 - **One command per `zwait` call.** Do not chain with `&&`, `;`, `||`, `&`,
   or pipe-fan-outs to bundle unrelated probes. Each logical operation

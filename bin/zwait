@@ -8,9 +8,10 @@ PROMPT_PREFIX="${ZWAIT_PROMPT_PREFIX:-$ }"
 
 [ $# -eq 0 ] && { echo "usage: zwait <command...>" >&2; exit 2; }
 
-CURRENT="/tmp/zwait_${SESSION}_current"
-DONE="/tmp/zwait_${SESSION}_done_$$"
-LOCK="/tmp/zwait_${SESSION}_lock"
+BASE="/tmp/zwait_${SESSION}"
+EXPECT="${BASE}_expect"
+SEQF="${BASE}_seq"
+LOCK="${BASE}_lock"
 CMD="$*"
 NLINES=$(printf '%s' "$CMD" | awk 'END{print NR}')
 [ "$NLINES" -lt 1 ] && NLINES=1
@@ -74,6 +75,12 @@ if ! flock -w "$TIMEOUT" 9; then
   exit 124
 fi
 
+# Allocate a session-unique token under the lock (monotonic, never reused).
+NONCE=$(( $(cat "$SEQF" 2>/dev/null || echo 0) + 1 ))
+printf '%s' "$NONCE" > "$SEQF"
+DONE="${BASE}_done_${NONCE}"
+rm -f "$DONE"
+
 # Don't type until the pane is back at an idle prompt. Guards the case where a
 # previous call hit its timeout and exited (releasing the lock) while its
 # command is still running in the pane.
@@ -86,9 +93,11 @@ until zellij -s "$SESSION" action dump-screen --full | is_idle; do
   sleep "$POLL"
 done
 
-# Tell the precmd hook where to write this command's exit code, then send it.
-rm -f "$DONE"
-printf '%s' "$DONE" > "$CURRENT"
+# Hand the token to the shell, then send the command. The next real command
+# (ours) claims the token via the preexec hook and writes its exit code into
+# "$DONE". Empty Enters / redraws fire precmd but not preexec, so they can
+# never claim the token or fake a completion.
+printf '%s' "$NONCE" > "$EXPECT"
 
 PASTE_START=$'\e[200~'
 PASTE_END=$'\e[201~'
