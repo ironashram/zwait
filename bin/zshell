@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Pane shell wrapper: runs zsh under script(1) so zwait can extract command
+# output from the typescript byte log instead of scraping the screen.
+#
+# Set it as zellij's default shell in config.kdl:
+#   default_shell "/path/to/zwait/bin/zshell"
+#
+# The log is truncated (mode 0600) every time a pane starts; a stale busy
+# flag from a crashed shell is cleared so zwait's idle check can't deadlock.
+# Falls back to plain zsh if script(1) is unavailable - zwait then refuses to
+# run, loudly, rather than degrading.
+S="${ZELLIJ_SESSION_NAME:-default}"
+LOG="/tmp/zwait_${S}_log"
+rm -f "/tmp/zwait_${S}_busy"
+umask 077
+: > "$LOG"
+command -v script >/dev/null 2>&1 || exec zsh
+exec script -fqe -c zsh "$LOG"

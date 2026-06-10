@@ -19,10 +19,16 @@ into general behavior over a long session.
 
 - The helpers:
   - `zwait '<cmd>'` is the default. Types only the bare command into the
-    pane (so the user's shell history shows their original cmd verbatim,
-    no markers), waits for completion via preexec/precmd hooks that record the
-    exit code in a per-command file, then returns clean output and propagates
-    the exit code.
+    pane (so the user's shell history shows their original cmd verbatim),
+    waits for completion via preexec/precmd hooks that record the exit
+    code in a per-command file, then returns the command's exact output
+    (sliced from a pty byte log between invisible per-command markers;
+    nothing is scraped off the screen, so any prompt theme, partial-line
+    output, or huge output is handled exactly) and propagates the exit
+    code.
+    If `zwait` fails with "no typescript log", the pane is not running
+    under the `zshell` wrapper - ask the user to open a fresh pane. Do
+    not retry, and do not fall back to plain Bash.
     Default timeout 120s. The 120s is purely a visibility cap on your
     side, not a command lifetime cap. When it trips, the helper returns
     "timeout after 120s" with rc 124, but the underlying command keeps

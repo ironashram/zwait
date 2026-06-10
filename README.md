@@ -20,68 +20,88 @@ TTY. Two things break:
    to redraw the screen.
 
 `zwait` fixes both by making the agent's commands run in the user's actual
-shell, inside a zellij pane the user has open. The agent observes by polling
-zellij's screen-dump; the user observes by, well, looking at the pane.
+shell, inside a zellij pane the user has open. The agent gets the command's
+exact output from a pty byte log; the user observes by, well, looking at the
+pane.
 
 ## How it works
 
 ```
 +--------------------+               +-------------------+
 |  agent process     |               |  user shell       |
-|  (no tty)          |               |  (interactive,    |
-|                    |               |   inside zellij)  |
-|  zwait '<cmd>'  ---|---write------>|                   |
-|                    |   chars       |  $ <cmd>          |
+|  (no tty)          |               |  (zsh under       |
+|                    |               |   script(1),      |
+|  zwait '<cmd>'  ---|---write------>|   inside zellij)  |
+|                    |   chars       |                   |
+|                    |               |  $ <cmd>          |
 |                    |               |  ...output...     |
-|                    |               |                   |
 |                    |  <- result ---|  precmd hook      |
 |                    |     file      |  writes $? to it  |
 |                    |               |                   |
-|  dump-screen ----->|               |                   |
-|  extract output    |               |                   |
+|  slice byte log <--|---------------|  script(1) logs   |
+|  between markers   |               |  the pty stream   |
 +--------------------+               +-------------------+
 ```
 
-1. A zellij session is running with one pane attached to an interactive shell.
-2. The shell sources `shell/zwait.zsh`, which adds `preexec` and `precmd`
-   hooks. `zwait` writes a unique token before sending each command; the
-   `preexec` hook (which fires only when a real command runs) claims that
-   token, and `precmd` writes the command's `$?` into the result file named for
-   that token. Empty Enters and redraws fire `precmd` but not `preexec`, so they
-   can't fake a completion.
-3. From outside the session, `zwait '<cmd>'` writes the token, types the command
-   into the pane via `zellij action write-chars`, then polls for that result
-   file. When it appears the command finished. `zwait` dumps the screen, extracts
-   the output between the previous prompt and the new one, prints it, and exits
-   with the captured `$?`. Concurrent `zwait` calls against the same session are
-   serialized by a per-session lock, so a batch of calls can't garble the shared
-   pane.
+1. zellij's `default_shell` is `bin/zshell`, which runs the interactive zsh
+   under `script(1)`, logging the pane's raw pty byte stream to
+   `/tmp/zwait_<session>_log`.
+2. The shell sources `shell/zwait.zsh`. Its `preexec`/`precmd` hooks do three
+   things: claim the per-command token `zwait` wrote before sending (preexec
+   fires only when a real command runs, so empty Enters and redraws can't fake
+   a completion, and precmd writes the command's `$?` into the result file
+   named for that token); maintain a `_busy` flag so the helper can tell the
+   pane is idle without reading the screen; and print invisible APC escape
+   markers around each claimed command. Terminals ignore APC so nothing
+   renders - but script(1) logs the raw bytes, and the pty stream orders them
+   strictly between the command echo and the next prompt.
+3. From outside the session, `zwait '<cmd>'` waits for the busy flag to clear,
+   types the command into the pane via `zellij action write-chars`, polls for
+   its result file, then slices the command's exact output bytes out of the
+   log between its two markers, renders them (escape stripping,
+   carriage-return overwrites), prints the result and exits with the captured
+   `$?`. Concurrent `zwait` calls against the same session are serialized by a
+   per-session lock, so a batch of calls can't garble the shared pane.
 
 The user sees `<cmd>` in their shell history exactly as they would have typed
 it. The agent gets clean stdout and a real exit code.
+
+There is no screen scraping and no prompt-pattern matching anywhere: the
+output is a byte range in an append-only log, delimited by nonce-keyed
+markers. Prompt themes, line wrapping, partial lines (output without a
+trailing newline), and zellij's scrollback limit are all irrelevant by
+construction.
 
 ## Requirements
 
 - [zellij](https://zellij.dev/) on `$PATH`
 - bash (for the helpers themselves)
 - zsh for the interactive shell that runs in the pane (needs `preexec`/`precmd`)
-- Linux (the per-session lock uses util-linux `flock`)
+- Linux (the per-session lock uses util-linux `flock`; the pty log uses
+  util-linux `script`)
 
 ## Install
 
-Clone the repo anywhere, then put `bin/` on your `$PATH` and source the
-shell hook in your interactive shell's rc file. For example:
+Clone the repo anywhere, put `bin/` on your `$PATH`, source the shell hook in
+your interactive shell's rc file, and set `bin/zshell` as zellij's default
+shell. For example:
 
 ```sh
 git clone https://github.com/<org>/zwait
 cd zwait
 
 # helpers - any directory already on $PATH works
-install -m 0755 bin/zwait bin/zr bin/zi /usr/local/bin/
+install -m 0755 bin/zwait bin/zr bin/zi bin/zshell /usr/local/bin/
 
 # shell hook for the interactive shell that runs inside the zellij pane
 echo "source $(pwd)/shell/zwait.zsh" >> ~/.zshrc
+
+# pane shells must run under the script(1) wrapper
+echo 'default_shell "/usr/local/bin/zshell"' >> ~/.config/zellij/config.kdl
 ```
+
+Panes opened before `default_shell` was wired in have no byte log; `zwait`
+refuses to drive them ("no typescript log") - open a fresh pane.
 
 Then start a zellij session your agent will use:
 
@@ -126,17 +146,16 @@ Environment variables:
 | `ZELLIJ_SESSION` | `zwait` | Session name to target. |
 | `ZWAIT_TIMEOUT` | `120` | Seconds before `zwait` gives up (command keeps running). |
 | `ZWAIT_POLL` | `1` | Result-file poll interval in seconds. |
-| `ZWAIT_PROMPT_PREFIX` | `$ ` | First characters of your shell prompt. **Set this to something distinctive** - the default `$ ` collides with command and output lines. |
 
-**Set `ZWAIT_PROMPT_PREFIX` to something distinctive - this is the most
-important knob.** `zwait` decides "where does the output end and the next
-prompt begin" by looking for lines that start with `$ZWAIT_PROMPT_PREFIX`, and
-it decides "is the pane idle" by checking the last line is the bare prefix. The
-default `$ ` is a footgun: it collides with command lines and any output line
-starting with `$ `, corrupting both the output extraction and the idle check.
-Pick a prefix that won't appear at the start of normal output - a themed prompt
-glyph (`❯ `, `┌─[`), your `user@host:` segment, or a dedicated `PS1` like
-`[zwait] `. See [docs/design.md](docs/design.md) for the parsing logic.
+There is no prompt configuration: output extraction is keyed on invisible
+per-command markers in the pty byte log, so any prompt theme works untouched.
+
+**The byte log records everything displayed in the pane** - including output
+of commands the user types by hand - in plaintext at
+`/tmp/zwait_<session>_log` (mode 0600, truncated every time a pane starts).
+Typed *input* is never logged, so hidden prompts (sudo/gpg/ssh passphrases)
+don't leak into it. On most distros `/tmp` is tmpfs: RAM-backed, gone at
+reboot.
 
 ## Things to watch out for
 
@@ -152,9 +171,12 @@ glyph (`❯ `, `┌─[`), your `user@host:` segment, or a dedicated `PS1` like
 - **`exit` and `kill -9 $$` close the pane.** Don't `zwait 'exit'`. The shell
   dies, zellij closes the pane, the next `zwait` call fails.
 
-- **TUIs don't work.** `vim`, `htop`, `less`, anything that takes over the
-  screen and expects to control the cursor will confuse the prompt parser.
-  Use the pane directly, or use `zr` to inspect state without sending input.
+- **TUIs don't make sense through `zwait`.** `vim`, `htop`, `less` work fine
+  when the user runs them directly in the pane (it's a real tty all the way
+  down), but driving one via `zwait` returns its raw redraw churn rendered to
+  noise - the renderer handles carriage-return overwrites, not full-screen
+  cursor addressing. Use the pane directly, or `zr` to inspect state without
+  sending input.
 
 - **Commands that never return.** `tail -f`, dev servers, etc. Use a
   `--timeout` flag on the command itself, or run it in the background
@@ -226,9 +248,10 @@ Caveats:
 
 [docs/design.md](docs/design.md) covers the non-obvious choices: why a
 preexec-claimed token (and a per-session lock) instead of an mtime tick or a
-precmd-consumed pointer, why bracketed-paste mode for the command write, why the
-screen-dump regex looks the way it does, why `delete-session --force` has an
-unfixable race, and what fails on which platforms.
+precmd-consumed pointer, why bracketed-paste mode for the command write, why
+output comes from a pty byte log sliced between invisible APC markers instead
+of screen scraping, why `delete-session --force` has an unfixable race, and
+what fails on which platforms.
 
 ## License
 
