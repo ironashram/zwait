@@ -66,6 +66,20 @@ extract_output() {
   '
 }
 
+# When a command's output has no trailing newline, the shell draws the next
+# prompt on the same row ("404$ "), hiding it from the line-anchored prompt
+# checks above. Split such rows so the prompt always starts a line.
+dump_screen() {
+  zellij -s "$SESSION" action dump-screen --full | awk -v p="$PROMPT_PREFIX" '
+    {
+      while ((i = index(substr($0, 2), p)) > 0) {
+        print substr($0, 1, i)
+        $0 = substr($0, i + 1)
+      }
+      print
+    }'
+}
+
 # Serialize concurrent zwait calls against the same session: they share one
 # pane, so two writers would interleave keystrokes. The lock makes parallel
 # calls run one-at-a-time (each to completion) instead of colliding.
@@ -85,7 +99,7 @@ rm -f "$DONE"
 # previous call hit its timeout and exited (releasing the lock) while its
 # command is still running in the pane.
 guard=$((SECONDS + TIMEOUT))
-until zellij -s "$SESSION" action dump-screen --full | is_idle; do
+until dump_screen | is_idle; do
   if (( SECONDS >= guard )); then
     echo "zwait: pane busy on $SESSION (no idle prompt in ${TIMEOUT}s); did not run" >&2
     exit 124
@@ -111,7 +125,7 @@ while (( SECONDS < deadline )); do
   rc=$(cat "$DONE" 2>/dev/null || echo 0)
   for j in 0.05 0.1 0.2 0.4 0.8 1.6; do
     sleep "$j"
-    screen=$(zellij -s "$SESSION" action dump-screen --full)
+    screen=$(dump_screen)
     if printf '%s\n' "$screen" | have_settled; then
       printf '%s\n' "$screen" | extract_output "$NLINES"
       rm -f "$DONE"
