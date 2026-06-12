@@ -120,7 +120,12 @@ pane width, and silent truncation at the scrollback ceiling.
 The current design removes the screen from the read path entirely:
 
 1. `zshell` runs the pane's zsh under `script(1)`, which logs the raw pty
-   byte stream to `/tmp/zwait_<session>_log`.
+   byte stream to a per-instance typescript behind the
+   `/tmp/zwait_<session>_log` symlink. Each instance gets its own inode:
+   sharing one path broke on pane reopen, when the dying previous script(1)
+   flushed a final write at its old fd offset into the freshly truncated
+   file, leaving the file size far past the new write head - so the
+   scan-from-recorded-size extraction below never found new markers.
 2. When the preexec hook claims a token, it prints `ESC _ zwS<token> ESC \`;
    when precmd finishes that command, it prints `ESC _ zwE<token> ESC \`.
    These are APC (Application Program Command) escape sequences: terminals

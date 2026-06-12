@@ -44,8 +44,8 @@ pane.
 ```
 
 1. zellij's `default_shell` is `bin/zshell`, which runs the interactive zsh
-   under `script(1)`, logging the pane's raw pty byte stream to
-   `/tmp/zwait_<session>_log`.
+   under `script(1)`, logging the pane's raw pty byte stream to a
+   per-instance typescript behind the `/tmp/zwait_<session>_log` symlink.
 2. The shell sources `shell/zwait.zsh`. Its `preexec`/`precmd` hooks do three
    things: claim the per-command token `zwait` wrote before sending (preexec
    fires only when a real command runs, so empty Enters and redraws can't fake
@@ -152,7 +152,9 @@ per-command markers in the pty byte log, so any prompt theme works untouched.
 
 **The byte log records everything displayed in the pane** - including output
 of commands the user types by hand - in plaintext at
-`/tmp/zwait_<session>_log` (mode 0600, truncated every time a pane starts).
+`/tmp/zwait_<session>_log` (a symlink to a fresh per-instance `_log_<pid>`
+file, mode 0600, created every time a pane starts; older instances' files
+are removed).
 Typed *input* is never logged, so hidden prompts (sudo/gpg/ssh passphrases)
 don't leak into it. On most distros `/tmp` is tmpfs: RAM-backed, gone at
 reboot.

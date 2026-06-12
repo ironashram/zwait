@@ -5,14 +5,23 @@
 # Set it as zellij's default shell in config.kdl:
 #   default_shell "/path/to/zwait/bin/zshell"
 #
-# The log is truncated (mode 0600) every time a pane starts; a stale busy
-# flag from a crashed shell is cleared so zwait's idle check can't deadlock.
-# Falls back to plain zsh if script(1) is unavailable - zwait then refuses to
-# run, loudly, rather than degrading.
+# The typescript is a per-instance file (_log_<pid>, mode 0600) behind a
+# stable _log symlink. Writing the stable path directly broke on pane reopen:
+# the dying previous script(1) could flush one last write at its old fd
+# offset after the new instance truncated the file, leaving a sparse hole and
+# a file size far past the new write head, so zwait (which scans from
+# "current size") never found new markers. A fresh inode per instance rules
+# that out; the old instance keeps writing its own unlinked file, which is
+# harmless. A stale busy flag from a crashed shell is cleared so zwait's idle
+# check can't deadlock. Falls back to plain zsh if script(1) is unavailable -
+# zwait then refuses to run, loudly, rather than degrading.
 S="${ZELLIJ_SESSION_NAME:-default}"
-LOG="/tmp/zwait_${S}_log"
+LINK="/tmp/zwait_${S}_log"
+LOG="${LINK}_$$"
 rm -f "/tmp/zwait_${S}_busy"
 umask 077
-: > "$LOG"
 command -v script >/dev/null 2>&1 || exec zsh
+rm -f "${LINK}"_*
+: > "$LOG"
+ln -sfn "$LOG" "$LINK"
 exec script -fqe -c zsh "$LOG"
