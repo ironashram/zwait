@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Resolve which zellij session the helpers should target.
+#
+# Deriving the name from VSCODE_CWD (what the example profile's comment used
+# to suggest) is wrong whenever a VSCode window is opened by an
+# already-running instance (desktop launch, recents, `code .` reuse):
+# VSCODE_CWD belongs to the shared main process, so every extension host sees
+# the FIRST launch's cwd, not this window's workspace. In a multi-root
+# workspace the terminal cwd additionally follows the active editor's folder,
+# so no single folder basename is a stable window identity either.
+#
+# Instead the session launcher (bin/zvscode for VSCode; any script can do the
+# same) records the directories a session serves in /tmp/zwait_<session>_ws,
+# one absolute path per line. This resolver matches the caller's location
+# against those records:
+#
+#   1) ZELLIJ_SESSION_NAME - already inside a pane, nothing to resolve
+#   2) recorded mappings: first candidate dir (PWD, then VSCODE_CWD) that
+#      sits under a recorded path wins; deepest recorded path first, newest
+#      record on a tie (two sessions can legitimately record the same folder,
+#      e.g. a repo opened alone and as a member of a workspace)
+#   3) the static default: zwait
+
+if [[ -n "${ZELLIJ_SESSION_NAME:-}" ]]; then
+  printf '%s\n' "$ZELLIJ_SESSION_NAME"
+  exit 0
+fi
+
+_match_for() {
+  local cand="$1" best="" best_len=-1 best_mt=-1 f ws s mt
+  cand=$(readlink -f -- "$cand" 2>/dev/null) || return 1
+  [[ -n "$cand" ]] || return 1
+  for f in /tmp/zwait_*_ws; do
+    [[ -f "$f" ]] || continue
+    mt=$(stat -c %Y "$f")
+    while IFS= read -r ws; do
+      [[ -n "$ws" ]] || continue
+      if [[ "$cand" == "$ws" || "$cand" == "$ws"/* ]]; then
+        if (( ${#ws} > best_len || (${#ws} == best_len && mt > best_mt) )); then
+          best_len=${#ws}
+          best_mt=$mt
+          s="${f#/tmp/zwait_}"
+          best="${s%_ws}"
+        fi
+      fi
+    done < "$f"
+  done
+  [[ -n "$best" ]] && printf '%s\n' "$best"
+}
+
+for cand in "$PWD" "${VSCODE_CWD:-}"; do
+  [[ -n "$cand" ]] || continue
+  if out=$(_match_for "$cand"); then
+    printf '%s\n' "$out"
+    exit 0
+  fi
+done
+
+printf 'zwait\n'

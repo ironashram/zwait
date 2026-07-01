@@ -193,9 +193,49 @@ terminal" yellow warning. So the profile takes the race and lives with the
 ~1% case where the new session inherits weirdness.
 
 A robust fix would be to `delete-session --force` *synchronously* (zellij
-upstream issue) or to use a different session name each time (which the
-example VSCode profile does, indirectly, via the `${workspaceFolderBasename}`
-derivation).
+upstream issue) or to use a different session name each time (which
+`zvscode` does, indirectly, via its per-window name derivation).
+
+## Why session targeting is record-based, not env-based
+
+The helpers need to answer "which session belongs to the window I'm running
+in" from a subprocess that zellij knows nothing about (an agent's Bash tool
+inside a VSCode extension host). Two env-based derivations were tried and
+both are subtly wrong:
+
+- **`VSCODE_CWD`** is set once on the VSCode *main process*. All windows of
+  one instance share it, so any window opened from an already-running
+  instance (desktop launch, recents list, `code .` reusing the singleton)
+  sees the first launch's cwd. It identifies the instance, not the window.
+- **The terminal's own `$PWD`** works for single-folder windows (VSCode sets
+  it per window) but not for multi-root workspaces: the terminal opens in
+  whichever member folder the active editor belongs to, so the same window
+  yields different names on different days. Meanwhile the agent subprocess
+  sits in the *primary* folder - a different member. The two sides derive
+  different names from the same window.
+
+The fix is to stop deriving and start recording. The only process that knows
+the window's real identity at session-creation time is the launcher
+(`zvscode`): its `$PWD` is a member folder, and walking up to the
+`.code-workspace` file that lists that folder recovers the workspace name
+and the full member list. It writes them to `/tmp/zwait_<session>_ws` (one
+absolute path per line) before `zellij attach`. `zsession` then resolves
+from the consumer side: match `$PWD` (then `VSCODE_CWD`, then give up and
+default to `zwait`) against every record, deepest recorded path first.
+
+Deepest-first makes nested checkouts work (a record for `~/src` and one for
+`~/src/repo` - a caller in `~/src/repo/sub` belongs to the deeper one).
+Newest-mtime tie-breaking handles the same folder legitimately recorded by
+two sessions (a repo opened standalone and as a workspace member): the most
+recently opened window wins, which is at worst the same ambiguity a human
+faces. Records are plain files in `/tmp`: they die at reboot with the
+sessions they describe, and a stale record resolves to a dead session name,
+which fails loudly at the `zellij` call rather than typing into the wrong
+pane.
+
+Why not VSCode's `${workspaceFolderBasename}` substitution in the profile
+definition? It has been unreliable across VSCode versions, and it names the
+*folder*, which is exactly what multi-root windows can't be identified by.
 
 ## Why locked mode and single-pane
 
@@ -232,7 +272,8 @@ reasonable.
   adapting or removing. BSD `script` exists but takes different flags
   (`script -qF` instead of `-fqe -c`); `zshell` needs a small port. GNU
   `dd`'s `iflag=skip_bytes,count_bytes` and `grep -abo` also need BSD
-  equivalents. Completion detection is just file existence and works.
+  equivalents, as does `zsession`'s `stat -c %Y` (BSD: `stat -f %m`).
+  Completion detection is just file existence and works.
 - **WSL:** works, but `/tmp` is per-WSL-instance, so don't try to drive a
   zellij session that's running on the Windows host.
 - **non-Linux Unixes (FreeBSD, OpenBSD):** `flock` and a few `awk` edge cases

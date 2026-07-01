@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# VSCode terminal profile entrypoint - see examples/vscode-profile.json.
+# Decides the per-window zellij session name, records the workspace->session
+# mapping for zsession, then attaches.
+#
+# Single-folder window: session vscode-<basename $PWD>, record = $PWD.
+#
+# Multi-root (.code-workspace) window: VSCode opens the terminal in ONE
+# member folder, and WHICH one depends on the active editor - so the folder
+# basename is not a stable window identity. Instead walk up from $PWD looking
+# for a *.code-workspace file that lists $PWD as a member: the session is
+# named after the workspace file and ALL member folders are recorded, so
+# zsession resolves the session from any member (an agent's subprocess cwd is
+# the primary folder, not necessarily the pane's).
+#
+# Keep this fast and exec zellij without any delay/polling - a slow start
+# trips VSCode's "extension wants to relaunch terminal" warning.
+
+pwd_p=$(pwd -P)
+
+folders_of() {
+  grep -o '"path"[[:space:]]*:[[:space:]]*"[^"]*"' "$1" 2>/dev/null |
+    sed 's/.*"\([^"]*\)"$/\1/'
+}
+
+resolve_member() {
+  local base=$1 p=$2
+  case $p in "~/"*) p="$HOME/${p#\~/}" ;; "~") p=$HOME ;; esac
+  [[ $p = /* ]] || p="$base/$p"
+  readlink -f -- "$p" 2>/dev/null
+}
+
+find_ws() {
+  local dir=$1 f p r
+  while :; do
+    dir=$(dirname "$dir")
+    for f in "$dir"/*.code-workspace; do
+      [[ -f $f ]] || continue
+      while IFS= read -r p; do
+        r=$(resolve_member "$dir" "$p") || continue
+        [[ $r == "$1" ]] && { printf '%s\n' "$f"; return 0; }
+      done < <(folders_of "$f")
+    done
+    [[ $dir == "$HOME" || $dir == / ]] && return 1
+  done
+}
+
+if wsf=$(find_ws "$pwd_p"); then
+  S="vscode-$(basename "${wsf%.code-workspace}")"
+  wsdir=$(dirname "$wsf")
+  REC=$(folders_of "$wsf" | while IFS= read -r p; do
+    resolve_member "$wsdir" "$p" || true
+  done)
+else
+  B=$(basename "$pwd_p")
+  case $B in ''|/) B=default ;; esac
+  S="vscode-$B"
+  REC=$pwd_p
+fi
+
+# Debug: print the decision instead of attaching.
+if [[ -n "${ZVSCODE_PRINT:-}" ]]; then
+  printf 'session=%s\nrecords:\n%s\n' "$S" "$REC"
+  exit 0
+fi
+
+printf '%s\n' "$REC" > "/tmp/zwait_${S}_ws"
+zellij delete-session "$S" --force >/dev/null 2>&1 || true
+exec zellij attach -c "$S"

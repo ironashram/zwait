@@ -7,10 +7,13 @@ into general behavior over a long session.
 
 ---
 
-- VS Code terminal visibility via zellij: each VSCode window opens a zellij
-  session named `<prefix>-<workspaceFolderBasename>`. The helpers at
-  `bin/{zwait,zr,zi}` (on `$PATH` as `zwait`, `zr`, `zi`) target that
-  session automatically by reading `VSCODE_CWD` (or `$PWD`).
+- VS Code terminal visibility via zellij: each VSCode window opens its own
+  zellij session, named by `zvscode` (`vscode-<folder>` for a single-folder
+  window, `vscode-<workspace file basename>` for a multi-root workspace).
+  The helpers (`zwait`, `zr`, `zi` on `$PATH`) target the right window's
+  session automatically via `zsession`, which matches your cwd against the
+  workspace mappings the launcher recorded - never assume or hardcode a
+  session name.
 
 - **Always route shell commands through the helpers** so commands execute
   in the user's visible pane. Never probe for the session first - if the
@@ -45,16 +48,24 @@ into general behavior over a long session.
     Enter. For interactive prompts (fzf search, partial command edits,
     anything expecting input but not a newline).
 
-  - For raw special keys, use `zellij -s "$ZELLIJ_SESSION" action write
+  - `zspawn '<cmd>'` runs a never-returning command (`tail -f`,
+    `journalctl -f`, a dev server) in its own detached window and returns
+    immediately, printing a throwaway session name. Read it with
+    `zellij -s <name> action dump-screen` (`-f` for scrollback), stop it
+    with `zellij delete-session <name> --force`. `ztail <file>` is the
+    `tail -F` shorthand.
+
+  - For raw special keys, use `zellij -s "$(zsession)" action write
     <byte>` (3=Ctrl-C, 10=Enter, 27=Esc).
 
 - **Never use plain Bash.** Every shell command goes through `zwait` (or
   `zr`/`zi` for their specific niches). No fallback list, no exceptions.
   If a command is incompatible with `zwait` (TUI/interactive like
-  `vim`/`less`/`htop`, needs stdin like password prompts, never returns
-  like `tail -f`, or would kill the shell like `exit`/`kill -9 $$`, which
-  closes the pane and the session), do not run it - print the command for
-  the user to run themselves instead.
+  `vim`/`less`/`htop`, needs stdin like password prompts, or would kill
+  the shell like `exit`/`kill -9 $$`, which closes the pane and the
+  session), do not run it - print the command for the user to run
+  themselves instead. Never-returning watchers (`tail -f`,
+  `journalctl -f`, dev servers) go through `zspawn`/`ztail`, not `zwait`.
 
 - **One command per `zwait` call.** Do not chain with `&&`, `;`, `||`, `&`,
   or pipe-fan-outs to bundle unrelated probes. Each logical operation

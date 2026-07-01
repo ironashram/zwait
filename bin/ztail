@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# ztail <file> [tail-args...] - tail -F a file in its own detached window.
+# Thin wrapper over zspawn; prints the session name (read with
+# `zellij -s <name> action dump-screen`, stop with
+# `zellij delete-session <name> --force`).
+
+[ $# -ge 1 ] || { echo "usage: ztail <file> [tail-args...]" >&2; exit 2; }
+
+cmd="tail -F"
+for f in "$@"; do cmd+=" $(printf '%q' "$f")"; done
+
+exec env ZSPAWN_NAME="zbg-tail-$(basename -- "$1")" zspawn "$cmd"

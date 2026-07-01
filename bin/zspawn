@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# zspawn '<cmd>' - run a long-running command in its own detached terminal
+# window, backed by a throwaway zellij session so it can be watched and killed:
+#   read it:  zellij -s <name> action dump-screen   (--full for scrollback)
+#   stop it:  zellij delete-session <name> --force
+# Prints the session name on stdout. Fire-and-forget: returns immediately.
+#
+# The window is cleaned up automatically when its command exits or you close
+# it. ZSPAWN_TERMINAL is the terminal launch prefix, word-split, ending with
+# the emulator's "run this command" flag - default "konsole --separate -e";
+# e.g. "alacritty -e", "kitty -e", "gnome-terminal --". QT_QPA_PLATFORM is
+# unset for the launch because VSCode leaks QT_QPA_PLATFORM=offscreen into
+# the terminal env, which renders Qt emulators to no visible window.
+
+[ $# -ge 1 ] || { echo "usage: zspawn <command...>" >&2; exit 2; }
+
+CMD="$*"
+RAW="${ZSPAWN_NAME:-zbg-$$}"
+NAME=$(printf '%s' "$RAW" | tr -c 'A-Za-z0-9_-' '_')
+TERM_CMD="${ZSPAWN_TERMINAL:-konsole --separate -e}"
+SCRIPT="/tmp/zspawn_${NAME}.sh"
+
+# command runs verbatim in the window's shell (printf, not heredoc, so nothing
+# in CMD is expanded on this side)
+printf '#!/usr/bin/env bash\n%s\n' "$CMD" > "$SCRIPT"
+chmod +x "$SCRIPT"
+
+zellij delete-session "$NAME" --force >/dev/null 2>&1 || true
+
+LAYOUTF="/tmp/zspawn_${NAME}.kdl"
+printf 'layout {\n    pane command="bash" {\n        args "%s"\n    }\n}\n' "$SCRIPT" > "$LAYOUTF"
+
+# detached launcher + reaper. Args are passed positionally to avoid quoting
+# the command into the bash -c body; $1 (the terminal prefix) is expanded
+# unquoted on purpose so its flags word-split. `-s NAME -n <layout>` always
+# starts a fresh named session (plain `--session` + `--layout` would try to
+# add a tab to an existing one).
+setsid bash -c '
+  env -u QT_QPA_PLATFORM $1 zellij -s "$2" -n "$3"
+  zellij delete-session "$2" --force >/dev/null 2>&1
+  rm -f "$3" "$4"
+' _ "$TERM_CMD" "$NAME" "$LAYOUTF" "$SCRIPT" </dev/null >/dev/null 2>&1 &
+disown
+
+echo "$NAME"

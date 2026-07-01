@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SESSION="${ZELLIJ_SESSION:-zwait}"
+SESSION="${ZELLIJ_SESSION:-$("$(dirname "$(readlink -f "$0")")/zsession")}"
 TIMEOUT="${ZWAIT_TIMEOUT:-120}"
 POLL="${ZWAIT_POLL:-1}"
 

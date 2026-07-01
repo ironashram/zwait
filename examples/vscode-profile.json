@@ -1,16 +1,18 @@
 {
   "// Drop these settings into ~/.config/Code/User/settings.json (Linux) or": "",
   "// ~/Library/Application Support/Code/User/settings.json (macOS).": "",
-  "// Each VSCode window gets its own zellij session named vscode-<workspace-folder-name>,": "",
-  "// so opening multiple windows on different workspaces no longer evicts each other.": "",
-  "// The helpers default to the same name when launched from inside that VSCode window's": "",
-  "// extension host (Claude Code's Bash subprocess inherits VSCODE_CWD), so they target": "",
-  "// the right pane automatically.": "",
+  "// bin/zvscode names one zellij session per VSCode window: vscode-<folder>": "",
+  "// for a single-folder window, vscode-<workspace file basename> for a": "",
+  "// multi-root .code-workspace window. It also records the window's member": "",
+  "// folder(s) in /tmp/zwait_<session>_ws, which is how zsession routes the": "",
+  "// helpers to the right pane - the helpers never trust VSCODE_CWD, which": "",
+  "// is shared across all windows of one VSCode instance.": "",
+  "// Adjust the path if you installed the helpers somewhere else; use an": "",
+  "// absolute path - the profile may launch before your shell rc runs.": "",
 
   "terminal.integrated.profiles.linux": {
     "zellij": {
-      "path": "/bin/sh",
-      "args": ["-c", "B=$(basename \"$PWD\"); case \"$B\" in ''|/) B=default;; esac; S=vscode-$B; zellij delete-session \"$S\" --force >/dev/null 2>&1; exec zellij attach -c \"$S\""]
+      "path": "/usr/local/bin/zvscode"
     }
   },
   "terminal.integrated.defaultProfile.linux": "zellij",

@@ -82,16 +82,25 @@ construction.
 
 ## Install
 
-Clone the repo anywhere, put `bin/` on your `$PATH`, source the shell hook in
-your interactive shell's rc file, and set `bin/zshell` as zellij's default
-shell. For example:
+On Arch, build the package from [packaging/PKGBUILD](packaging/PKGBUILD)
+(installs the helpers into `/usr/bin`, the shell hook into
+`/usr/share/zwait/zwait.zsh`):
 
 ```sh
-git clone https://github.com/<org>/zwait
+cd packaging && makepkg -si
+echo 'source /usr/share/zwait/zwait.zsh' >> ~/.zshrc
+echo 'default_shell "/usr/bin/zshell"' >> ~/.config/zellij/config.kdl
+```
+
+Manual install - clone the repo anywhere, install the helpers, source the
+shell hook in your interactive shell's rc file, and set `bin/zshell` as
+zellij's default shell:
+
+```sh
+git clone https://github.com/ironashram/zwait
 cd zwait
 
-# helpers - any directory already on $PATH works
-install -m 0755 bin/zwait bin/zr bin/zi bin/zshell /usr/local/bin/
+install -m 0755 bin/zwait bin/zr bin/zi bin/zshell bin/zsession bin/zvscode /usr/local/bin/
 
 # shell hook for the interactive shell that runs inside the zellij pane
 echo "source $(pwd)/shell/zwait.zsh" >> ~/.zshrc
@@ -99,6 +108,13 @@ echo "source $(pwd)/shell/zwait.zsh" >> ~/.zshrc
 # pane shells must run under the script(1) wrapper
 echo 'default_shell "/usr/local/bin/zshell"' >> ~/.config/zellij/config.kdl
 ```
+
+Install into a **system directory** (`/usr/bin`, `/usr/local/bin`), not a
+shell-rc-added user dir (`~/bin`, `~/go/bin`, `~/.local/bin` on some
+distros). Desktop-launched editors never run your interactive shell rc, so
+their extension hosts - and every agent subprocess they spawn - only see the
+system default `PATH`. A helper that resolves in your terminal but not in the
+agent's subprocess is this exact failure.
 
 Panes opened before `default_shell` was wired in have no byte log; `zwait`
 refuses to drive them ("no typescript log") - open a fresh pane.
@@ -116,10 +132,13 @@ zwait 'ls -la'
 zwait 'kubectl get pods -n kube-system'
 ```
 
-Default session name is `zwait`. Override with `ZELLIJ_SESSION=<name>` per
-call, or `export ZELLIJ_SESSION=<name>` once.
+The helpers pick their target session via `zsession` (see
+[Per-window sessions](#per-window-sessions-vscode)): `ZELLIJ_SESSION=<name>`
+always wins when set, otherwise a recorded workspace mapping matching your
+cwd, otherwise the static default `zwait`. Plain non-VSCode usage needs no
+configuration at all - `zellij attach -c zwait` plus `zwait 'ls'` just works.
 
-## The three helpers
+## The helpers
 
 - `zwait '<cmd>'` - type one command into the pane, wait for completion,
   return its stdout and exit code. Default timeout 120s (override with
@@ -134,8 +153,58 @@ call, or `export ZELLIJ_SESSION=<name>` once.
 - `zi '<text>'` - type text into the active pane without pressing Enter.
   For interactive prompts (fzf search, partial command edits, anything
   expecting input but not a newline). For raw bytes (Ctrl-C, Esc):
-  `zellij -s "$ZELLIJ_SESSION" action write 3` (3 = Ctrl-C, 10 = Enter,
+  `zellij -s "$(zsession)" action write 3` (3 = Ctrl-C, 10 = Enter,
   27 = Esc).
+
+- `zspawn '<cmd>'` - fire-and-forget: run a never-returning command
+  (`tail -f`, `journalctl -f`, a dev server) in its OWN detached terminal
+  window, backed by a throwaway zellij session named `zbg-<pid>`. Prints the
+  session name and returns immediately. Read it with
+  `zellij -s <name> action dump-screen` (`-f` for scrollback), stop it with
+  `zellij delete-session <name> --force` (also auto-cleaned when the window
+  or command exits). Terminal emulator via `ZSPAWN_TERMINAL` (default
+  `konsole --separate -e`; set e.g. `alacritty -e`, `gnome-terminal --`).
+
+- `ztail <file> [tail-args...]` - thin wrapper for `zspawn 'tail -F <file>'`,
+  session named `zbg-tail-<basename>`. Same read/stop/cleanup as `zspawn`.
+
+- `zsession` - print the session name the other helpers would target from
+  here. Useful for raw zellij commands (`zellij -s "$(zsession)" action
+  write 3`) and for debugging resolution.
+
+- `zvscode` - VSCode terminal profile entrypoint; creates and names the
+  per-window session and records the workspace mapping. Not called by hand -
+  see the next section.
+
+## Per-window sessions (VSCode)
+
+[examples/vscode-profile.json](examples/vscode-profile.json) sets `zvscode`
+as the terminal profile, giving each VSCode window its own session:
+
+- single-folder window: `vscode-<folder basename>`
+- multi-root window: `vscode-<workspace file basename>` (e.g.
+  `infra.code-workspace` -> `vscode-infra`). VSCode opens the terminal in
+  whichever member folder the active editor belongs to, so a folder basename
+  is not a stable window identity; `zvscode` walks up from the terminal cwd
+  to the `.code-workspace` file that lists it as a member and names the
+  session after that.
+- no folder open: `vscode-default`
+
+`zvscode` records the window's member folder(s) in
+`/tmp/zwait_<session>_ws`, one absolute path per line (a multi-root window
+records every member). When an agent subprocess later runs `zwait`,
+`zsession` matches the subprocess cwd (then `VSCODE_CWD`) against all
+records - deepest recorded path wins, newest record on a tie - so the
+command lands in the right window's pane no matter which member folder the
+agent is working in.
+
+Why not just read `VSCODE_CWD` in the helpers? It belongs to the shared
+VSCode main process: every window opened from an already-running instance
+(desktop launch, recents, `code .` reuse) sees the *first* launch's cwd, not
+its own workspace. And why not `${workspaceFolderBasename}` in the profile
+definition? VSCode's variable substitution in profile `args` has been
+unreliable across versions - deriving from `$PWD` inside the launched
+process is not.
 
 ## Configuration
 
@@ -143,9 +212,10 @@ Environment variables:
 
 | Variable | Default | Effect |
 |---|---|---|
-| `ZELLIJ_SESSION` | `zwait` | Session name to target. |
+| `ZELLIJ_SESSION` | resolved | Force a session name (skips `zsession` resolution). |
 | `ZWAIT_TIMEOUT` | `120` | Seconds before `zwait` gives up (command keeps running). |
 | `ZWAIT_POLL` | `1` | Result-file poll interval in seconds. |
+| `ZSPAWN_TERMINAL` | `konsole --separate -e` | Terminal launch prefix for `zspawn`/`ztail`. |
 
 There is no prompt configuration: output extraction is keyed on invisible
 per-command markers in the pty byte log, so any prompt theme works untouched.
@@ -180,10 +250,10 @@ reboot.
   cursor addressing. Use the pane directly, or `zr` to inspect state without
   sending input.
 
-- **Commands that never return.** `tail -f`, dev servers, etc. Use a
-  `--timeout` flag on the command itself, or run it in the background
-  (`zwait 'cmd &'`), or accept that `zwait` will hit its timeout and the
-  user can Ctrl-C in the pane.
+- **Commands that never return.** `tail -f`, dev servers, etc. Route them
+  through `zspawn`/`ztail` (detached window, returns immediately) instead of
+  `zwait`. Alternatives: a `--timeout` flag on the command itself, or accept
+  that `zwait` will hit its timeout and the user can Ctrl-C in the pane.
 
 - **VSCode env-mismatch warning (Claude Code users only).** If you drive
   zwait from Claude Code's VSCode extension, you may see a yellow
@@ -228,11 +298,13 @@ Caveats:
   locked mode for the editor's sake, `Ctrl-g` from the external client
   toggles it for everyone (including the editor pane). Convenient when you
   want to type from outside; surprising the first time it happens.
-- **Set `ZELLIJ_SESSION` from the external shell.** The public `zwait`
-  defaults to a session literally named `zwait`. If your VSCode profile
-  uses a per-workspace name like `vscode-myrepo`, point `zwait` at it
-  with `ZELLIJ_SESSION=vscode-myrepo zwait '...'` (or `export
-  ZELLIJ_SESSION=...` once per terminal).
+- **Resolution works from external shells too.** `cd` into the workspace
+  (any member folder of a multi-root workspace) and `zwait`/`zr`/`zi`
+  resolve the window's session via the recorded mapping, exactly like the
+  agent does. Outside any recorded workspace, the default is the literal
+  session name `zwait` - point at a specific session with
+  `ZELLIJ_SESSION=vscode-myrepo zwait '...'` (or `export` it once per
+  terminal).
 
 ## Examples
 
@@ -245,6 +317,10 @@ Caveats:
   agent the rules: route everything through `zwait`, one command per call,
   no `| head` / `| tail` for tidiness, `git --no-pager` for paginated
   subcommands.
+
+- [examples/zellij-config.kdl](examples/zellij-config.kdl) - a known-good
+  `~/.config/zellij/config.kdl`: the required `default_shell`, locked mode,
+  and a bare single-pane look that fits an editor's terminal panel.
 
 ## Design
 
