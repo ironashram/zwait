@@ -1,6 +1,6 @@
 # Maintainer: Michele Palazzi <sysdadmin@m1k.cloud>
 pkgname=zwait
-pkgver=0.2.1
+pkgver=0.2.2
 pkgrel=1
 pkgdesc="Drive a user's visible zellij pane from a headless agent"
 arch=('any')

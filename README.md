@@ -82,31 +82,29 @@ construction.
 
 ## Install
 
-On Arch, build the package from [packaging/PKGBUILD](packaging/PKGBUILD)
-(installs the helpers into `/usr/bin`, the shell hook into
-`/usr/share/zwait/zwait.zsh`):
-
-```sh
-cd packaging && makepkg -si
-echo 'source /usr/share/zwait/zwait.zsh' >> ~/.zshrc
-echo 'default_shell "/usr/bin/zshell"' >> ~/.config/zellij/config.kdl
-```
-
-Manual install - clone the repo anywhere, install the helpers, source the
-shell hook in your interactive shell's rc file, and set `bin/zshell` as
-zellij's default shell:
+Any Linux - `install.sh` does the whole setup end-to-end and is idempotent
+(rerun after updates): binaries to `$PREFIX/bin` (default `/usr/local`),
+shell hook to `$PREFIX/share/zwait` plus the `~/.zshrc` source line,
+`default_shell "$PREFIX/bin/zshell"` in zellij's `config.kdl` (zellij must
+launch every pane through the `zshell` wrapper - that's what produces the
+pty byte log zwait reads output from), and the VSCode terminal profile
+merged into `settings.json` (backup kept):
 
 ```sh
 git clone https://github.com/ironashram/zwait
 cd zwait
+./install.sh
+```
 
-install -m 0755 bin/zwait bin/zr bin/zi bin/zshell bin/zsession bin/zvscode /usr/local/bin/
+Phases can run individually: `./install.sh binaries shellhook zellijcfg
+vscodecfg`.
 
-# shell hook for the interactive shell that runs inside the zellij pane
-echo "source $(pwd)/shell/zwait.zsh" >> ~/.zshrc
+On Arch, build the package from [packaging/PKGBUILD](packaging/PKGBUILD)
+(installs the files under `/usr`), then run just the config phases:
 
-# pane shells must run under the script(1) wrapper
-echo 'default_shell "/usr/local/bin/zshell"' >> ~/.config/zellij/config.kdl
+```sh
+cd packaging && makepkg -si && cd ..
+PREFIX=/usr ./install.sh shellhook zellijcfg vscodecfg
 ```
 
 Install into a **system directory** (`/usr/bin`, `/usr/local/bin`), not a
