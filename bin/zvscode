@@ -66,5 +66,17 @@ if [[ -n "${ZVSCODE_PRINT:-}" ]]; then
 fi
 
 printf '%s\n' "$REC" > "/tmp/zwait_${S}_ws"
-zellij delete-session "$S" --force >/dev/null 2>&1 || true
+# A session with attached clients means a VSCode terminal auto-relaunch (it
+# ORPHANS the previous client rather than killing it) or a second window on
+# the same workspace: evict the old clients - a lingering orphan freezes the
+# pane size, zellij renders at its SMALLEST attached client - and reattach
+# to the live session; force-deleting it here would race its teardown and
+# the pane would die instantly. A client-less session is a leftover from a
+# closed window (window close kills its clients): kill it and start a fresh
+# clean session, no stale scrollback.
+if zellij -s "$S" action list-clients 2>/dev/null | awk 'NR>1{f=1} END{exit !f}'; then
+  pkill -xf "zellij attach -c ${S}" 2>/dev/null || true
+else
+  zellij delete-session "$S" --force >/dev/null 2>&1 || true
+fi
 exec zellij attach -c "$S"

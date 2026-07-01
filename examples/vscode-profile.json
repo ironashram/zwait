@@ -7,12 +7,18 @@
   "// folder(s) in /tmp/zwait_<session>_ws, which is how zsession routes the": "",
   "// helpers to the right pane - the helpers never trust VSCODE_CWD, which": "",
   "// is shared across all windows of one VSCode instance.": "",
-  "// Adjust the path if you installed the helpers somewhere else; use an": "",
-  "// absolute path - the profile may launch before your shell rc runs.": "",
+  "// KEEP the /bin/sh -c wrapper: pointing the profile path straight at the": "",
+  "// zvscode binary trips VSCode's silent terminal auto-relaunch (the pane": "",
+  "// opens, relaunches ~1s later, and other windows' panes get relaunched": "",
+  "// too, orphaning zellij clients and freezing pane sizes). With the shell": "",
+  "// wrapper the relaunch never fires. Adjust the path if you installed the": "",
+  "// helpers somewhere else; use an absolute path - the profile may launch": "",
+  "// before your shell rc runs.": "",
 
   "terminal.integrated.profiles.linux": {
     "zellij": {
-      "path": "/usr/local/bin/zvscode"
+      "path": "/bin/sh",
+      "args": ["-c", "exec /usr/bin/zvscode"]
     }
   },
   "terminal.integrated.defaultProfile.linux": "zellij",

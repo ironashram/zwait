@@ -284,13 +284,12 @@ targets the session by name. Multiple clients mirror by default in zellij.
 
 Caveats:
 
-- **Order matters with the VSCode profile.** If you launch zellij
-  externally first and then open the matching VSCode workspace, VSCode's
-  profile runs `delete-session --force` and kills your external session.
-  Open VSCode first, attach externally second.
-- **VSCode reloads kill the external attach.** Reload Window, extension
-  updates, or closing and reopening the workspace all re-run the profile,
-  which re-creates the session and drops the external client. Re-attach.
+- **Attach without `-c` when mirroring.** `zvscode` evicts previous
+  `zellij attach -c <session>` clients (relaunch orphans) before attaching;
+  a plain `zellij attach <session>` mirror client doesn't match and
+  survives. Side effect: while your mirror is attached, reopening the
+  VSCode window reattaches to the running session instead of recreating it
+  (a client-less leftover session is recreated fresh).
 - **Detach, don't close.** `Ctrl-o d` in the external client detaches
   cleanly without killing the session. Closing the terminal window works
   too but is rougher.

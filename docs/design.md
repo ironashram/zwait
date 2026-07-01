@@ -167,34 +167,55 @@ command's final bytes have been drained into the log, silently clipping the
 tail. The marker is part of the stream itself, so it can't be reordered
 relative to the output.
 
-## Why `delete-session --force` has an unfixable race
+## Surviving VSCode's terminal auto-relaunch
 
-The example VSCode profile and similar use cases want "if a stale `zwait`
-session exists from a crashed previous run, kill it and start fresh." The
-naive command:
+The launcher wants "if a stale session exists from a previous run, clear it
+and start fresh." The naive command:
 
 ```sh
-zellij delete-session zwait --force
-exec zellij attach -c zwait
+zellij delete-session "$S" --force
+exec zellij attach -c "$S"
 ```
 
-Has a race: `delete-session --force` sends `KillSession` to the running
-zellij daemon and *returns immediately*, before the daemon has actually
-torn the session down. Then `attach -c` either:
+has two problems. First, a race: `delete-session --force` sends
+`KillSession` to the running zellij daemon and *returns immediately*, before
+the daemon has actually torn the session down, so `attach -c` can reattach
+to the dying session, briefly work, then die with it. Adding a polling loop
+to wait for the socket to disappear is not an option: any delay between
+profile-launch and `exec zellij` is long enough for VSCode's terminal
+subsystem to display the "extension wants to relaunch terminal" warning.
 
-- Reattaches to the dying session (it sees the socket as still present),
-  briefly works, then fails when the daemon finishes its kill.
-- Or creates a fresh session, depending on timing.
+Second - and this is what turns the race from a ~1% flake into a
+deterministic failure - VSCode can silently auto-relaunch a freshly opened
+terminal about a second after window open (extension environment
+contributions land after the first spawn, and a terminal with no
+interaction yet is relaunched without asking; zwait panes always look
+interaction-free to VSCode, because input arrives via the zellij server,
+never through VSCode's pty). The profile then runs *twice* per window open:
+the second run's forced delete kills the perfectly healthy session the
+first run just created, and its attach races the teardown and dies. The
+user sees the pane open and instantly close.
 
-We don't add a polling loop to wait for the socket to disappear because
-any delay between profile-launch and `exec zellij` is long enough for
-VSCode's terminal subsystem to display the "extension wants to relaunch
-terminal" yellow warning. So the profile takes the race and lives with the
-~1% case where the new session inherits weirdness.
+Empirically the relaunch fires when the profile `path` points straight at
+the zvscode binary, and does not when the profile is the
+`/bin/sh -c 'exec zvscode'` wrapper shown in
+[examples/vscode-profile.json](../examples/vscode-profile.json) - keep the
+wrapper. On top of that, `zvscode` discriminates the two cases by attached
+clients, so a relaunch is harmless and a real reopen still gets a fresh
+session:
 
-A robust fix would be to `delete-session --force` *synchronously* (zellij
-upstream issue) or to use a different session name each time (which
-`zvscode` does, indirectly, via its per-window name derivation).
+- **Session has attached clients** - that's a relaunch (it *orphans* the
+  previous attach client rather than killing it) or a second window on the
+  same workspace. Evict the old clients and reattach: zellij sizes a
+  session to its smallest attached client, so a lingering orphan freezes
+  the pane size, and force-deleting a session this young races its
+  teardown. The pane itself lives in the server and is untouched by the
+  client kill.
+- **Session alive but client-less** - a leftover from a closed window
+  (closing a window kills its clients). `delete-session --force` it and
+  start fresh: no stale scrollback or old shell state on a real window
+  open, and the teardown race against a long-idle server is the rare
+  benign flake it always was.
 
 ## Why session targeting is record-based, not env-based
 
