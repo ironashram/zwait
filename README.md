@@ -99,12 +99,14 @@ cd zwait
 Phases can run individually: `./install.sh binaries shellhook zellijcfg
 vscodecfg`.
 
-On Arch, build the package from the PKGBUILD in
-[ironashram/arch-pkgbuilds](https://github.com/ironashram/arch-pkgbuilds)
-(`zwait/` directory, installs the files under `/usr`), then run just the
-config phases:
+On Arch, build the `zwait-git` package from
+[packaging/PKGBUILD](packaging/PKGBUILD) (tracks `master`, installs the files
+under `/usr`), then run just the config phases:
 
 ```sh
+cd packaging
+makepkg -si
+cd ..
 PREFIX=/usr ./install.sh shellhook zellijcfg vscodecfg
 ```
 

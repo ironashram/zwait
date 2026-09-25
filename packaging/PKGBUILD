@@ -1,0 +1,30 @@
+# Maintainer: Michele Palazzi <sysdadmin@m1k.cloud>
+pkgname=zwait-git
+_pkgname=zwait
+pkgver=0.2.2.r1.g36c97ea
+pkgrel=1
+pkgdesc="Drive a user's visible zellij pane from a headless agent"
+arch=('any')
+url="https://github.com/ironashram/zwait"
+license=('MIT')
+depends=('bash' 'zsh' 'zellij' 'util-linux' 'gawk' 'coreutils' 'grep' 'sed')
+makedepends=('git')
+optdepends=('konsole: default terminal for zspawn/ztail detached windows')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+source=("$_pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$_pkgname"
+  git describe --long --tags --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+}
+
+package() {
+  cd "$_pkgname"
+  install -Dm755 bin/* -t "$pkgdir/usr/bin"
+  install -Dm644 shell/zwait.zsh -t "$pkgdir/usr/share/zwait"
+  install -Dm644 examples/* -t "$pkgdir/usr/share/zwait/examples"
+  install -Dm644 README.md docs/design.md -t "$pkgdir/usr/share/doc/$_pkgname"
+  install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$_pkgname"
+}
