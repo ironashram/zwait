@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+USAGE="usage: zagent start <name> [dir] | stop <name> | ls"
+BIN="$(dirname "$(readlink -f "$0")")"
+
+session_of() {
+  local n="${1#agent-}"
+  [[ $n =~ ^[A-Za-z0-9-]+$ ]] || { echo "zagent: name must match [A-Za-z0-9-]+" >&2; exit 2; }
+  printf 'agent-%s\n' "$n"
+}
+
+case "${1:-}" in
+  start)
+    S=$(session_of "${2:?$USAGE}")
+    cd "${3:-$PWD}"
+    zellij delete-session "$S" --force >/dev/null 2>&1 || true
+    rm -f /tmp/zwait_"$S"_*
+    TERM=xterm-256color zellij attach -b "$S"
+    for _ in $(seq 100); do
+      [[ -f "/tmp/zwait_${S}_log" && -s "/tmp/zwait_${S}_pane" ]] && break
+      sleep 0.1
+    done
+    ZWAIT_TIMEOUT=30 "$BIN/zwait" -s "$S" "stty cols ${ZAGENT_COLS:-200} rows ${ZAGENT_ROWS:-50}" >/dev/null
+    echo "$S"
+    ;;
+  stop)
+    S=$(session_of "${2:?$USAGE}")
+    zellij delete-session "$S" --force >/dev/null 2>&1 || true
+    rm -f /tmp/zwait_"$S"_*
+    ;;
+  ls)
+    zellij list-sessions --short --no-formatting 2>/dev/null | grep '^agent-' || true
+    ;;
+  *)
+    echo "$USAGE" >&2
+    exit 2
+    ;;
+esac

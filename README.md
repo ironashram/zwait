@@ -134,9 +134,13 @@ zwait 'kubectl get pods -n kube-system'
 ```
 
 The helpers pick their target session via `zsession` (see
-[Per-window sessions](#per-window-sessions-vscode)): `ZELLIJ_SESSION=<name>`
-always wins when set, otherwise a recorded workspace mapping matching your
-cwd, otherwise the static default `zwait`. Plain non-VSCode usage needs no
+[Per-window sessions](#per-window-sessions-vscode)): `-s <name>` as the first
+argument of `zwait`/`zr`/`zi` always wins, then `ZELLIJ_SESSION=<name>`,
+otherwise a recorded workspace mapping matching your cwd, otherwise the
+static default `zwait`. Within the session they target the pane `zshell`
+recorded in `/tmp/zwait_<session>_pane` (the pane whose byte log they read),
+falling back to the focused pane for panes started before that file existed.
+Client-less sessions have no focused pane, so they need the recorded one. Plain non-VSCode usage needs no
 configuration at all - `zellij attach -c zwait` plus `zwait 'ls'` just works.
 
 ## The helpers
@@ -168,6 +172,16 @@ configuration at all - `zellij attach -c zwait` plus `zwait 'ls'` just works.
 
 - `ztail <file> [tail-args...]` - thin wrapper for `zspawn 'tail -F <file>'`,
   session named `zbg-tail-<basename>`. Same read/stop/cleanup as `zspawn`.
+
+- `zagent start <name> [dir]` / `zagent stop <name>` / `zagent ls` - headless
+  sessions for parallel or unattended agents, so they never queue behind or
+  type into the user's pane. `start` creates a client-less session
+  `agent-<name>` with its shell in `dir` (default: cwd), widens the pty to
+  200x50 (`ZAGENT_COLS`/`ZAGENT_ROWS`) and returns once the shell answers.
+  `stop` deletes the session and its `/tmp/zwait_agent-<name>_*` state,
+  including the byte log. Drive it with `zwait -s agent-<name> '<cmd>'`,
+  `zr -s agent-<name>`, `zi -s agent-<name>`. Watch it live from any terminal
+  with `zellij attach agent-<name>`.
 
 - `zsession` - print the session name the other helpers would target from
   here. Useful for raw zellij commands (`zellij -s "$(zsession)" action

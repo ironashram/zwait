@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
-SESSION="${ZELLIJ_SESSION:-$("$(dirname "$(readlink -f "$0")")/zsession")}"
+SESSION=""
+if [ "${1:-}" = "-s" ]; then
+  SESSION="${2:?usage: zi [-s session] <text>}"
+  shift 2
+fi
+SESSION="${SESSION:-${ZELLIJ_SESSION:-$("$(dirname "$(readlink -f "$0")")/zsession")}}"
 [ $# -eq 0 ] && {
-  echo "usage: zi <text>    types into active pane, no Enter" >&2
+  echo "usage: zi [-s session] <text>    types into the zwait pane, no Enter" >&2
   echo "for raw bytes: zellij -s \"\$(zsession)\" action write <byte>" >&2
   exit 2
 }
-exec zellij -s "$SESSION" action write-chars "$*"
+PANE=()
+if [ -s "/tmp/zwait_${SESSION}_pane" ]; then
+  PANE=(-p "terminal_$(<"/tmp/zwait_${SESSION}_pane")")
+fi
+exec zellij -s "$SESSION" action write-chars "${PANE[@]}" "$*"

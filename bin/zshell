@@ -20,6 +20,9 @@ LINK="/tmp/zwait_${S}_log"
 LOG="${LINK}_$$"
 rm -f "/tmp/zwait_${S}_busy"
 umask 077
+if [[ -n "${ZELLIJ_PANE_ID:-}" ]]; then
+  printf '%s\n' "$ZELLIJ_PANE_ID" > "/tmp/zwait_${S}_pane"
+fi
 command -v script >/dev/null 2>&1 || exec zsh
 rm -f "${LINK}"_*
 : > "$LOG"

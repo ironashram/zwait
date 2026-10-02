@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
-SESSION="${ZELLIJ_SESSION:-$("$(dirname "$(readlink -f "$0")")/zsession")}"
-if [ "${1:-}" = "-f" ] || [ "${1:-}" = "--full" ]; then
-  exec zellij -s "$SESSION" action dump-screen --full
+SESSION=""
+if [ "${1:-}" = "-s" ]; then
+  SESSION="${2:?usage: zr [-s session] [-f|--full]}"
+  shift 2
 fi
-exec zellij -s "$SESSION" action dump-screen
+SESSION="${SESSION:-${ZELLIJ_SESSION:-$("$(dirname "$(readlink -f "$0")")/zsession")}}"
+PANE=()
+if [ -s "/tmp/zwait_${SESSION}_pane" ]; then
+  PANE=(-p "terminal_$(<"/tmp/zwait_${SESSION}_pane")")
+fi
+if [ "${1:-}" = "-f" ] || [ "${1:-}" = "--full" ]; then
+  exec zellij -s "$SESSION" action dump-screen "${PANE[@]}" --full
+fi
+exec zellij -s "$SESSION" action dump-screen "${PANE[@]}"

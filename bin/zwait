@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SESSION="${ZELLIJ_SESSION:-$("$(dirname "$(readlink -f "$0")")/zsession")}"
+USAGE="usage: zwait [-s session] <command...>"
+SESSION=""
+if [[ "${1:-}" == -s ]]; then
+  SESSION="${2:?$USAGE}"
+  shift 2
+fi
+SESSION="${SESSION:-${ZELLIJ_SESSION:-$("$(dirname "$(readlink -f "$0")")/zsession")}}"
 TIMEOUT="${ZWAIT_TIMEOUT:-120}"
 POLL="${ZWAIT_POLL:-1}"
 
-[ $# -eq 0 ] && { echo "usage: zwait <command...>" >&2; exit 2; }
+[ $# -eq 0 ] && { echo "$USAGE" >&2; exit 2; }
 
 BASE="/tmp/zwait_${SESSION}"
+PANE=()
+if [[ -s "${BASE}_pane" ]]; then
+  PANE=(-p "terminal_$(<"${BASE}_pane")")
+fi
 EXPECT="${BASE}_expect"
 SEQF="${BASE}_seq"
 LOCK="${BASE}_lock"
@@ -107,8 +117,8 @@ printf '%s' "$NONCE" > "$EXPECT"
 
 PASTE_START=$'\e[200~'
 PASTE_END=$'\e[201~'
-zellij -s "$SESSION" action write-chars "${PASTE_START}${CMD}${PASTE_END}"
-zellij -s "$SESSION" action write 10
+zellij -s "$SESSION" action write-chars "${PANE[@]}" "${PASTE_START}${CMD}${PASTE_END}"
+zellij -s "$SESSION" action write "${PANE[@]}" 10
 
 deadline=$((SECONDS + TIMEOUT))
 while (( SECONDS < deadline )); do
