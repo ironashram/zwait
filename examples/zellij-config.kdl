@@ -3,11 +3,15 @@
 // default_shell is REQUIRED: zwait's output capture reads the pty byte log
 // the zshell wrapper writes. Adjust the path to where you installed the
 // helpers (/usr/bin for the Arch package, /usr/local/bin for the manual
-// install). Locked mode is recommended so an accidental keybinding can't
-// kill the session out from under the agent (see docs/design.md); the rest
+// install). session_serialization false is REQUIRED too: a resurrected
+// session re-runs the pane's saved command instead of default_shell, so the
+// pane comes back without zshell (see the README). Locked mode is
+// recommended so an accidental keybinding can't kill the session out from
+// under the agent (see docs/design.md); the rest
 // keeps a bare, quiet single pane that fits an editor's terminal panel.
 default_mode "locked"
 default_shell "/usr/bin/zshell"
+session_serialization false
 pane_frames false
 simplified_ui true
 default_layout "compact"

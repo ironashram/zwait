@@ -85,10 +85,10 @@ construction.
 Any Linux - `install.sh` does the whole setup end-to-end and is idempotent
 (rerun after updates): binaries to `$PREFIX/bin` (default `/usr/local`),
 shell hook to `$PREFIX/share/zwait` plus the `~/.zshrc` source line,
-`default_shell "$PREFIX/bin/zshell"` in zellij's `config.kdl` (zellij must
-launch every pane through the `zshell` wrapper - that's what produces the
-pty byte log zwait reads output from), and the VSCode terminal profile
-merged into `settings.json` (backup kept):
+`default_shell "$PREFIX/bin/zshell"` and `session_serialization false` in
+zellij's `config.kdl` (zellij must launch every pane through the `zshell`
+wrapper - that's what produces the pty byte log zwait reads output from),
+and the VSCode terminal profile merged into `settings.json` (backup kept):
 
 ```sh
 git clone https://github.com/ironashram/zwait
@@ -119,6 +119,18 @@ agent's subprocess is this exact failure.
 
 Panes opened before `default_shell` was wired in have no byte log; `zwait`
 refuses to drive them ("no typescript log") - open a fresh pane.
+
+`session_serialization false` is required as well. With serialization on,
+zellij saves each session's layout, including the command running in every
+pane, and `zellij attach -c` resurrects an exited session from it. The
+resurrected pane re-runs the saved command (`script -fqe -c zsh
+/tmp/zwait_<session>_log_<old pid>`) instead of `default_shell`, so `zshell`
+never runs, the `_log` symlink is never created, and `zwait` fails with "no
+typescript log" in a pane that looks normal. `zvscode`'s delete-before-attach
+does not prevent it: `delete-session --force` returns before the old server
+is gone. Seen on zellij 0.46. After turning it off, clear the sessions that
+were already saved once with `zellij delete-all-sessions -y` (removes only
+exited sessions).
 
 Then start a zellij session your agent will use:
 
@@ -333,8 +345,9 @@ Caveats:
   subcommands.
 
 - [examples/zellij-config.kdl](examples/zellij-config.kdl) - a known-good
-  `~/.config/zellij/config.kdl`: the required `default_shell`, locked mode,
-  and a bare single-pane look that fits an editor's terminal panel.
+  `~/.config/zellij/config.kdl`: the required `default_shell` and
+  `session_serialization false`, locked mode, and a bare single-pane look
+  that fits an editor's terminal panel.
 
 ## Design
 

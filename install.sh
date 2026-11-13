@@ -7,8 +7,9 @@ set -euo pipefail
 # Phases (default: all):
 #   binaries   - bin/* -> $PREFIX/bin
 #   shellhook  - shell/zwait.zsh -> $PREFIX/share/zwait + source line in ~/.zshrc
-#   zellijcfg  - default_shell "$PREFIX/bin/zshell" in zellij's config.kdl
-#                (seeded from examples/zellij-config.kdl when absent)
+#   zellijcfg  - default_shell "$PREFIX/bin/zshell" and session_serialization
+#                false in zellij's config.kdl (seeded from
+#                examples/zellij-config.kdl when absent)
 #   vscodecfg  - merge the zellij terminal profile into VSCode settings.json
 #
 # PREFIX defaults to /usr/local. Arch package users: the PKGBUILD installs
@@ -39,16 +40,21 @@ shellhook() {
 
 zellijcfg() {
   local kdl="${XDG_CONFIG_HOME:-$HOME/.config}/zellij/config.kdl"
-  local want="default_shell \"$PREFIX/bin/zshell\""
+  local -A want=(
+    [default_shell]="default_shell \"$PREFIX/bin/zshell\""
+    [session_serialization]="session_serialization false"
+  )
+  local key
   mkdir -p "$(dirname "$kdl")"
-  if [[ ! -f "$kdl" ]]; then
-    sed "s|^default_shell .*|$want|" "$REPO_DIR/examples/zellij-config.kdl" > "$kdl"
-  elif grep -q '^default_shell ' "$kdl"; then
-    grep -qxF "$want" "$kdl" || sed -i "s|^default_shell .*|$want|" "$kdl"
-  else
-    printf '%s\n' "$want" >> "$kdl"
-  fi
-  echo "zellij default_shell -> $PREFIX/bin/zshell ($kdl)"
+  [[ -f "$kdl" ]] || cp "$REPO_DIR/examples/zellij-config.kdl" "$kdl"
+  for key in "${!want[@]}"; do
+    if grep -q "^$key " "$kdl"; then
+      grep -qxF "${want[$key]}" "$kdl" || sed -i "s|^$key .*|${want[$key]}|" "$kdl"
+    else
+      printf '%s\n' "${want[$key]}" >> "$kdl"
+    fi
+  done
+  echo "zellij default_shell -> $PREFIX/bin/zshell, session_serialization false ($kdl)"
 }
 
 vscodecfg() {
