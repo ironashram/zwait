@@ -10,8 +10,14 @@ fi
 SESSION="${SESSION:-${ZELLIJ_SESSION:-$("$(dirname "$(readlink -f "$0")")/zsession")}}"
 TIMEOUT="${ZWAIT_TIMEOUT:-120}"
 POLL="${ZWAIT_POLL:-1}"
+START_TIMEOUT="${ZWAIT_START_TIMEOUT:-5}"
 
 [ $# -eq 0 ] && { echo "$USAGE" >&2; exit 2; }
+
+if ! perr=$(zsh -fn -c "$*" 2>&1); then
+  echo "zwait: not sent, zsh cannot parse the command: $perr" >&2
+  exit 2
+fi
 
 BASE="/tmp/zwait_${SESSION}"
 PANE=()
@@ -119,6 +125,17 @@ PASTE_START=$'\e[200~'
 PASTE_END=$'\e[201~'
 zellij -s "$SESSION" action write-chars "${PANE[@]}" "${PASTE_START}${CMD}${PASTE_END}"
 zellij -s "$SESSION" action write "${PANE[@]}" 10
+
+start_deadline=$((SECONDS + START_TIMEOUT))
+while [[ "$(cat "$EXPECT" 2>/dev/null)" == "$NONCE" ]]; do
+  if (( SECONDS >= start_deadline )); then
+    : > "$EXPECT"
+    zellij -s "$SESSION" action write "${PANE[@]}" 3
+    echo "zwait: command never started on $SESSION within ${START_TIMEOUT}s (continuation prompt or rejected line); sent Ctrl-C to clear it" >&2
+    exit 2
+  fi
+  sleep 0.2
+done
 
 deadline=$((SECONDS + TIMEOUT))
 while (( SECONDS < deadline )); do

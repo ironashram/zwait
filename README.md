@@ -162,6 +162,12 @@ configuration at all - `zellij attach -c zwait` plus `zwait 'ls'` just works.
   `ZWAIT_TIMEOUT=300`). The 120s is a visibility cap on the helper, not a
   command lifetime cap: if it times out, the underlying command keeps
   running in the pane and the user can interact with it normally.
+  A command that cannot reach the shell fails fast with rc 2 instead of
+  burning the timeout: one zsh cannot parse (unmatched quote or backtick)
+  is refused before anything is typed, and one that is typed but never
+  starts within `ZWAIT_START_TIMEOUT` (a trailing backslash or any other
+  line that leaves the shell at a continuation prompt) is cleared with
+  Ctrl-C.
 
 - `zr` - dump the current screen without sending anything. `zr -f` includes
   scrollback. Useful for polling state between writes or inspecting a
@@ -242,6 +248,7 @@ Environment variables:
 | `ZELLIJ_SESSION` | resolved | Force a session name (skips `zsession` resolution). |
 | `ZWAIT_TIMEOUT` | `120` | Seconds before `zwait` gives up (command keeps running). |
 | `ZWAIT_POLL` | `1` | Result-file poll interval in seconds. |
+| `ZWAIT_START_TIMEOUT` | `5` | Seconds a typed command may take to start before `zwait` clears the line and fails. |
 | `ZSPAWN_TERMINAL` | `konsole --separate -e` | Terminal launch prefix for `zspawn`/`ztail`. |
 
 There is no prompt configuration: output extraction is keyed on invisible
